@@ -1,5 +1,9 @@
 import math, os, pickle, re
 from typing import Tuple, List, Dict
+from collections import Counter
+
+logging_level = 1
+retrain = True
 
 
 class BayesClassifier:
@@ -30,7 +34,7 @@ class BayesClassifier:
         self.pos_file_prefix: str = "movies-5"
 
         # check if both cached classifiers exist within the current directory
-        if os.path.isfile(self.pos_filename) and os.path.isfile(self.neg_filename):
+        if os.path.isfile(self.pos_filename) and os.path.isfile(self.neg_filename) and retrain == False:
             print("Data files found - loading to use pickled values...")
             self.pos_freqs = self.load_dict(self.pos_filename)
             self.neg_freqs = self.load_dict(self.neg_filename)
@@ -53,6 +57,23 @@ class BayesClassifier:
 
         # files now holds a list of the filenames
         # self.training_data_directory holds the folder name where these files are
+        #split files into positive and negative
+        pos_files: List[str] = [file for file in files if file.startswith(self.pos_file_prefix)]
+        neg_files: List[str] = [file for file in files if file.startswith(self.neg_file_prefix)]
+
+        # update the frequencies for each file
+        for file in pos_files:
+            text = self.load_file(os.path.join(self.training_data_directory, file))
+            tokens = self.tokenize(text)
+            self.update_dict(tokens, self.pos_freqs)
+        if logging_level >= 1:
+            print(f"Updated positive frequencies for {len(pos_files)} files")
+        for file in neg_files:
+            text = self.load_file(os.path.join(self.training_data_directory, file))
+            tokens = self.tokenize(text)
+            self.update_dict(tokens, self.neg_freqs)
+        if logging_level >= 1:
+            print(f"Updated negative frequencies for {len(neg_files)} files")
 
         # *Tip:* training can take a while, to make it more transparent, we can use the
         # enumerate function, which loops over something and has an automatic counter.
@@ -87,6 +108,9 @@ class BayesClassifier:
         # avoid extra work in the future (using the save_dict method). The objects you
         # are saving are self.pos_freqs and self.neg_freqs and the filepaths to save to
         # are self.pos_filename and self.neg_filename
+        self.save_dict(self.pos_freqs, self.pos_filename)
+        self.save_dict(self.neg_freqs, self.neg_filename)
+        return None
 
     def classify(self, text: str) -> str:
         """Classifies given text as positive or negative from calculating the
@@ -98,6 +122,7 @@ class BayesClassifier:
         Returns:
             classification, either positive or negative
         """
+        #TODO: Psuedocode for classify
 
         pass
         
@@ -162,6 +187,23 @@ class BayesClassifier:
         with open(filepath, "rb") as f:
             return pickle.Unpickler(f).load()
 
+    """
+    Tokenizes the input text into a list of string tokens.
+
+    Args:
+        text (str): The input string of text to be tokenized.
+
+    Returns:
+        List[str]: A list of tokens (strings) extracted from the input text, in order. 
+        Tokens are typically word-like sequences and punctuation is kept as separate tokens. 
+        All tokens representing words are converted to lowercase.
+
+    Input Example:
+        text = "Hello, world!"
+
+    Output Example:
+        ["hello", ",", "world", "!"]
+    """
     def tokenize(self, text: str) -> List[str]:
         """Splits given text into a list of the individual tokens in order
 
@@ -192,6 +234,25 @@ class BayesClassifier:
             tokens.append(token.lower())
         return tokens
 
+    """
+    Updates the provided frequency dictionary with the counts of each word from the given list.
+
+    Args:
+        words (List[str]): A list of word tokens to be added to the frequency dictionary.
+        freqs (Dict[str, int]): The dictionary mapping words to their frequencies. This dictionary
+                                will be updated in-place, incrementing the count for each word 
+                                according to its occurrences in 'words'. If a word does not
+                                exist in the dictionary, it will be added with a frequency of 1.
+
+    Returns:
+        None. The 'freqs' dictionary is modified in-place.
+
+    Example:
+        words = ["happy", "day", "happy"]
+        freqs = {}
+        update_dict(words, freqs)
+        # After execution, freqs will be {"happy": 2, "day": 1}
+    """
     def update_dict(self, words: List[str], freqs: Dict[str, int]) -> None:
         """Updates given (word -> frequency) dictionary with given words list
 
@@ -204,8 +265,17 @@ class BayesClassifier:
             words - list of tokens to update frequencies of
             freqs - dictionary of frequencies to update
         """
-        pass
-
+        #for each word in words, if the word exists in freqs, increment the count by 1, otherwise add the word to freqs with a count of 1
+        for word in words:
+            if word in freqs:
+                freqs[word] += 1
+            else:
+                freqs[word] = 1
+        
+        if logging_level >= 2:
+            print(f"Updated frequencies for {len(words)} words for dictionary ")
+        
+        return None
 
 
 if __name__ == "__main__":
@@ -219,6 +289,7 @@ if __name__ == "__main__":
     assert a_dictionary["really"] == 1, "update_dict test 3"
     assert a_dictionary["too"] == 1, "update_dict test 4"
 
+    print("pos_freqs: ", sum(b.pos_freqs.values()))
     assert sum(b.pos_freqs.values()) == 612445, "pos denominator test"
     assert sum(b.neg_freqs.values()) == 129404, "neg denominator test"
 
