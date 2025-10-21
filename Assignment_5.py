@@ -127,28 +127,46 @@ class BayesClassifier:
         pass
         
         # get a list of the individual tokens that occur in text
+        tokens = self.tokenize(text)
         
         # create some variables to store the positive and negative probabilities. since
         # we will be adding logs of probabilities, the initial values for the positive
         # and negative probabilities are set to 0
+        positive_probability = 0.0
+        negative_probability = 0.0
 
         # get the sum of all of the frequencies of the features in each document class
         # (i.e. how many words occurred in total across all documents for the given class) - 
         # will be used in calculating the probability of each document class given each
         # individual feature
+        positive_sum = sum(self.pos_freqs.values())
+        negative_sum = sum(self.neg_freqs.values())
 
         # for each token in the text, calculate the probability of it occurring in a
         # positive document and in a negative document and add the logs of those to the
         # running sums. when calculating the probabilities, always add 1 to the numerator
         # of each probability for add one smoothing (so that we never have a probability
         # of 0)
+        for token in tokens:
+            token_positive_probability = ((self.pos_freqs.get(token, 0) + 1) / positive_sum)
+            token_negative_probability = ((self.neg_freqs.get(token, 0) + 1) / negative_sum)
+
+            positive_probability += math.log(token_positive_probability)
+            negative_probability += math.log(token_negative_probability)
+
 
         # for debugging purposes, it may help to print the overall positive and negative
         # probabilities
+        if logging_level >= 1:
+            print(f"Positive probability: {positive_probability}")
+            print(f"Negative probability: {negative_probability}")
 
         # determine whether positive or negative was more probable (i.e. which one was
         # larger)
-
+        if positive_probability > negative_probability:
+            return "positive"
+        else:
+            return "negative"
         # return a string of "positive" or "negative"
 
     def load_file(self, filepath: str) -> str:
