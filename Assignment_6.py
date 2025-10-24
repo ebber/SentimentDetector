@@ -257,6 +257,33 @@ class BayesClassifier:
             (accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1)
         """
         #TODO: Start here when we pick back up
+
+        #Define TP, FP, TN, FN
+        TP = 0
+        FP = 0
+        TN = 0
+        FN = 0
+        for result in classy_results:
+            if result[1] == "positive" and result[2] == "positive":
+                TP += 1
+            elif result[1] == "positive" and result[2] == "negative":
+                FN += 1
+            elif result[1] == "negative" and result[2] == "positive":
+                FP += 1
+            elif result[1] == "negative" and result[2] == "negative":
+                TN += 1
+
+
+        #calculate metrics
+        accuracy = (TP + TN) / (TP + TN + FP + FN)
+        pos_precision = TP / (TP + FP)
+        pos_recall = TP / (TP + FN)
+        pos_f1 = 2 * pos_precision * pos_recall / (pos_precision + pos_recall)
+        neg_precision = TN / (TN + FN)
+        neg_recall = TN / (TN + FP)
+        neg_f1 = 2 * neg_precision * neg_recall / (neg_precision + neg_recall)
+
+        return (accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1)
     def calculate_averages(self, k_sets_of_metrics: List[Tuple]) -> List[float]:
         """Calculates and returns the average of each of the metrics across the k runs.
 
@@ -271,7 +298,34 @@ class BayesClassifier:
         Returns:
             Produces and returns a list of 7 items, the average value for each metric across the k runs.
         """
-        pass
+        #tuple lookst like (accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1)
+        num_tuples = len(k_sets_of_metrics)
+        accuracy = 0
+        pos_precision = 0
+        pos_recall = 0
+        pos_f1 = 0
+        neg_precision = 0
+        neg_recall = 0
+        neg_f1 = 0
+
+        for tuple in k_sets_of_metrics:
+            accuracy += tuple[0]
+            pos_precision += tuple[1]
+            pos_recall += tuple[2]
+            pos_f1 += tuple[3]
+            neg_precision += tuple[4]
+            neg_recall += tuple[5]
+            neg_f1 += tuple[6]
+        
+        accuracy /= num_tuples
+        pos_precision /= num_tuples
+        pos_recall /= num_tuples
+        pos_f1 /= num_tuples
+        neg_precision /= num_tuples
+        neg_recall /= num_tuples
+        neg_f1 /= num_tuples
+
+        return [accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1]
 
     def evaluate(self) -> None:
         """ This method drives the k-fold cross validation process. First, it calls the
@@ -307,7 +361,7 @@ class BayesClassifier:
 
 if __name__ == "__main__":
     b = BayesClassifier()
-    #b.evaluate()
+    b.evaluate()
 
     b.split()
     first_file_1 = b.sets[0][0]
@@ -384,6 +438,8 @@ if __name__ == "__main__":
     assert metrics[5] == 0.875, "negative recall test"
     assert metrics[6] == 0.823529411764706, "negative f1 test"
 
+    print("All analyze_results tests passed!")
+
     k_results = [(0.8115523465703971, 0.9829738933030647, 0.7787769784172662, 0.8690416457601605,
                   0.5119047619047619, 0.945054945054945, 0.664092664092664),
                  (0.8168709444844989, 0.97669256381798, 0.7906558849955077, 0.8738828202581926,
@@ -404,9 +460,17 @@ if __name__ == "__main__":
                   0.510934393638171, 0.9413919413919414, 0.6623711340206185),
                  (0.8103821196827685, 0.9786036036036037, 0.7807726864330637, 0.8685657171414293,
                   0.5110220440881763, 0.9306569343065694, 0.6597671410090555)]
+    # For each metric index, print whether all values in k_results for that metric are close to the corresponding summary_result
     summary_results = [0.8077045885315558, 0.9764069019775603, 0.779315253996264, 0.8667617890490593,
                        0.5070434672828428, 0.9232346728697094, 0.654504480135216]
 
+    results = b.calculate_averages(k_results)
+
+    if logging_level >= 1:
+        print(list(map(lambda x: x[0] == x[1], zip(results, summary_results))))
+    if logging_level >= 1:
+        print(results)
+        
     assert len(b.calculate_averages(k_results)) == 7, "calculate averages test 1"
     assert b.calculate_averages(k_results) == summary_results, "calculate averages test 2"
 
@@ -418,7 +482,7 @@ if __name__ == "__main__":
     summary_results = [0.814211645527448, 0.9798332285605224, 0.7847164317063869, 0.8714622330091766,
                     0.5162404467960023, 0.9342063046442608, 0.6649410688884373]
     assert b.calculate_averages(k_results) == summary_results, "calculate averages test 3"
-
+    print("All calculate averages tests passed!")
     print("All tests passed!!")
 
     
