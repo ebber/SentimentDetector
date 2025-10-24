@@ -19,17 +19,34 @@ class BayesClassifier:
         sets - a list of lists - the k sets of file names
     """
 
-    def __init__(self):
+    def __init__(self, training_dir: str = "movie_reviews/", k_folds: int = 10):
+        """Initialize BayesClassifier with optional configuration.
+        
+        Args:
+            training_dir: Path to training data directory
+            k_folds: Number of folds for k-fold cross validation
+        
+        Raises:
+            ValueError: If training_dir doesn't exist or k_folds <= 0
+        """
+        # Validate training directory exists
+        if not os.path.exists(training_dir):
+            raise ValueError(f"Training directory not found: {training_dir}")
+        
+        # Validate k parameter
+        if k_folds <= 0:
+            raise ValueError(f"k must be positive, got: {k_folds}")
+        
         self.pos_freqs: Dict[str, int] = {}
         self.neg_freqs: Dict[str, int] = {}
-        self.training_data_directory: str = "movie_reviews/"
+        self.training_data_directory: str = training_dir
         self.neg_file_prefix: str = "movies-1"
         self.pos_file_prefix: str = "movies-5"
         #data members added for cross validation
         self.n: int = 0     #total number of files
         self.pos_n: int = 0 #total number of pos files
         self.neg_n: int = 0 #total number of neg files
-        self.k: int = 10    #for k-fold cross validation
+        self.k: int = k_folds
         self.sets: List[List[str]] = [] #k sets of filenames for k-fold cross validation
 
     def train(self, files: List[str]) -> None:
@@ -42,26 +59,52 @@ class BayesClassifier:
         Args: files - a list of files to use as training data.
 
         Returns: None
+        
+        Raises:
+            ValueError: If files list is None or empty
         """
+        # Validate input
+        if files is None:
+            raise ValueError("files list cannot be None")
+        if not files:
+            raise ValueError("files list cannot be empty")
 
         #reset the following 4 attributes to wipe out any prior training
         self.pos_freqs = {}
         self.neg_freqs = {}
         self.pos_n = 0
         self.neg_n = 0
+        
+        failed_files = []
 
         for index, filename in enumerate(files, 1):
-            text = self.load_file(os.path.join(self.training_data_directory, filename))
+            # Progress tracking for large datasets
+            if logging_level >= 1 and index % 100 == 0:
+                print(f"Training progress: {index}/{len(files)} files processed")
+            
+            try:
+                text = self.load_file(os.path.join(self.training_data_directory, filename))
+                tokens: List[str] = self.tokenize(text)
 
-            tokens: List[str] = self.tokenize(text)
-
-            if filename.startswith(self.pos_file_prefix):
-                self.update_dict(tokens, self.pos_freqs)
-                self.pos_n += 1
-
-            elif filename.startswith(self.neg_file_prefix):
-                self.update_dict(tokens, self.neg_freqs)
-                self.neg_n += 1
+                if filename.startswith(self.pos_file_prefix):
+                    self.update_dict(tokens, self.pos_freqs)
+                    self.pos_n += 1
+                elif filename.startswith(self.neg_file_prefix):
+                    self.update_dict(tokens, self.neg_freqs)
+                    self.neg_n += 1
+            except Exception as e:
+                # Handle file read errors gracefully - log and continue
+                failed_files.append((filename, str(e)))
+                if logging_level >= 1:
+                    print(f"Warning: Failed to process file '{filename}': {e}")
+        
+        # Report failed files at end
+        if failed_files and logging_level >= 1:
+            print(f"Training completed with {len(failed_files)} failed files out of {len(files)}")
+        
+        # Ensure we trained on at least some files
+        if self.pos_n == 0 and self.neg_n == 0:
+            raise ValueError("Training failed: No valid files were processed")
 
     def classify(self, text: str) -> str:
         """Classifies given text as positive or negative by calculating the
@@ -72,7 +115,24 @@ class BayesClassifier:
 
         Returns:
             classification as a str, either positive or negative
+            
+        Raises:
+            ValueError: If text is None/empty or classifier not trained
         """
+        # Validate input
+        if text is None:
+            raise ValueError("text cannot be None")
+        if not text.strip():
+            raise ValueError("text cannot be empty")
+        
+        # Check classifier is trained
+        if not self.pos_freqs and not self.neg_freqs:
+            raise ValueError("Classifier not trained. Call train() first.")
+        
+        # Prevent division by zero
+        if self.pos_n + self.neg_n == 0:
+            raise ValueError("No training data: pos_n and neg_n are both 0")
+        
         tokens = self.tokenize(text)
 
         #initialize the probabilities with the prior probabilities of each class
@@ -108,9 +168,30 @@ class BayesClassifier:
 
         Returns:
             text of the given file
+            
+        Raises:
+            ValueError: If filepath is None or empty
+            FileNotFoundError: If file doesn't exist
+            UnicodeDecodeError: If file encoding is incompatible
         """
-        with open(filepath, "r", encoding='utf8') as f:
-            return f.read()
+        # Validate input
+        if filepath is None:
+            raise ValueError("filepath cannot be None")
+        if not filepath.strip():
+            raise ValueError("filepath cannot be empty")
+        
+        # Handle file operations with explicit error handling
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"File not found: {filepath}")
+        
+        try:
+            with open(filepath, "r", encoding='utf8') as f:
+                return f.read()
+        except UnicodeDecodeError as e:
+            raise UnicodeDecodeError(
+                e.encoding, e.object, e.start, e.end,
+                f"Failed to decode file '{filepath}': {e.reason}"
+            )
 
     def save_dict(self, dict: Dict, filepath: str) -> None:
         """Pickles given dictionary to a file with the given name
@@ -118,10 +199,26 @@ class BayesClassifier:
         Args:
             dict - a dictionary to pickle
             filepath - relative path to file to save
+            
+        Raises:
+            ValueError: If filepath is None/empty
+            PermissionError: If no write permission
+            IOError: If disk is full or other I/O error
         """
-        print(f"Dictionary saved to file: {filepath}")
-        with open(filepath, "wb") as f:
-            pickle.Pickler(f).dump(dict)
+        # Validate input
+        if filepath is None:
+            raise ValueError("filepath cannot be None")
+        if not filepath.strip():
+            raise ValueError("filepath cannot be empty")
+        
+        try:
+            print(f"Dictionary saved to file: {filepath}")
+            with open(filepath, "wb") as f:
+                pickle.Pickler(f).dump(dict)
+        except PermissionError as e:
+            raise PermissionError(f"No write permission for file: {filepath}") from e
+        except IOError as e:
+            raise IOError(f"I/O error writing to {filepath}: {e}") from e
 
     def load_dict(self, filepath: str) -> Dict:
         """Loads pickled dictionary stored in given file
@@ -131,10 +228,27 @@ class BayesClassifier:
 
         Returns:
             dictionary stored in given file
+            
+        Raises:
+            ValueError: If filepath is None/empty
+            FileNotFoundError: If file doesn't exist
+            pickle.UnpicklingError: If file is corrupted
         """
-        print(f"Loading dictionary from file: {filepath}")
-        with open(filepath, "rb") as f:
-            return pickle.Unpickler(f).load()
+        # Validate input
+        if filepath is None:
+            raise ValueError("filepath cannot be None")
+        if not filepath.strip():
+            raise ValueError("filepath cannot be empty")
+        
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Dictionary file not found: {filepath}")
+        
+        try:
+            print(f"Loading dictionary from file: {filepath}")
+            with open(filepath, "rb") as f:
+                return pickle.Unpickler(f).load()
+        except pickle.UnpicklingError as e:
+            raise pickle.UnpicklingError(f"Corrupted pickle file '{filepath}': {e}")
 
     def tokenize(self, text: str) -> List[str]:
         """Splits given text into a list of the individual tokens in order
@@ -193,26 +307,37 @@ class BayesClassifier:
         evenly into k sets, the size of the sets might be off by one.
 
         Returns: None
-        """
         
-        #Missing edge case handling, incl empty directory, non existent directory, fewer files than k
+        Raises:
+            ValueError: If training directory doesn't exist, is empty, or has fewer files than k
+        """
+        # Validate directory exists
+        if not os.path.exists(self.training_data_directory):
+            raise ValueError(f"Training directory not found: {self.training_data_directory}")
+        
+        # Validate k is positive
+        if self.k <= 0:
+            raise ValueError(f"k must be positive, got: {self.k}")
+        
         #reset the sets
         self.sets = []
         
-        files: List[str] = next(os.walk(self.training_data_directory))[2]
+        # Get files and validate
+        try:
+            files: List[str] = next(os.walk(self.training_data_directory))[2]
+        except StopIteration:
+            raise ValueError(f"Cannot access directory: {self.training_data_directory}")
+        
+        if not files:
+            raise ValueError(f"Training directory is empty: {self.training_data_directory}")
+        
+        if len(files) < self.k:
+            raise ValueError(f"Not enough files ({len(files)}) for {self.k}-fold cross-validation")
+        
         random.shuffle(files)
         increment= len(files) // self.k
-        for i in range(0, self.k):
-            #len=100, K=4; splits should be [0:25, 25:50, 50:75, 75:100]
-            #len=99, K=4; splits should be [0:24, 24:48, 48:72, 72:99]
-            
-            #activate this code if we want to pick up all files instead of keeping the number of files in each set consistent
-            #if (i+1)*increment > len(files) or i == self.k - 1: #last set may have less than increment files
-            #    self.sets.append(files[i*increment:])
-            #    if logging_level >= 1:
-            #        print(f"Overflow error: Set {i} has {len(self.sets[i])} files, interval was {i*increment} to {(i+1)*increment}")
-            #else:
-            self.sets.append(files[i*increment:(i+1)*increment]) #last set may have less than increment files
+        for i in range(self.k):
+            self.sets.append(files[i*increment:(i+1)*increment])
         
 
     def classify_all(self, testing_data_set: List[str]) -> List[Tuple[str, str, str]]:
@@ -229,13 +354,39 @@ class BayesClassifier:
              ('movies-5-13188.txt', 'positive', 'positive'),
              ('movies-5-7898.txt', 'positive', 'negative'),
             ...]
+            
+        Raises:
+            ValueError: If testing_data_set is None or empty
         """
+        # Validate input
+        if testing_data_set is None:
+            raise ValueError("testing_data_set cannot be None")
+        if not testing_data_set:
+            raise ValueError("testing_data_set cannot be empty")
+        
         classification_results = []
-        for file in testing_data_set:
-            text = self.load_file(os.path.join(self.training_data_directory, file))
-            classification = self.classify(text)
-            truth_value = "positive" if file.startswith(self.pos_file_prefix) else "negative"
-            classification_results.append((file, truth_value, classification))
+        failed_files = []
+        
+        for index, file in enumerate(testing_data_set, 1):
+            # Progress indicator for large datasets
+            if logging_level >= 1 and index % 50 == 0:
+                print(f"Classification progress: {index}/{len(testing_data_set)} files")
+            
+            try:
+                text = self.load_file(os.path.join(self.training_data_directory, file))
+                classification = self.classify(text)
+                truth_value = "positive" if file.startswith(self.pos_file_prefix) else "negative"
+                classification_results.append((file, truth_value, classification))
+            except Exception as e:
+                # Handle file read failures gracefully - log and continue
+                failed_files.append((file, str(e)))
+                if logging_level >= 1:
+                    print(f"Warning: Failed to classify file '{file}': {e}")
+        
+        # Report failed files at end
+        if failed_files and logging_level >= 1:
+            print(f"Classification completed with {len(failed_files)} failed files out of {len(testing_data_set)}")
+        
         return classification_results
 
     def analyze_results(self, classy_results: List[Tuple[str, str, str]]) -> Tuple[float, float, float, float, float, float, float]:
@@ -255,8 +406,15 @@ class BayesClassifier:
             Using the classy_results data, this function will produce and return a
             tuple of the following metrics:
             (accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1)
+            
+        Raises:
+            ValueError: If classy_results is None or empty
         """
-        #TODO: Start here when we pick back up
+        # Validate input
+        if classy_results is None:
+            raise ValueError("classy_results cannot be None")
+        if not classy_results:
+            raise ValueError("classy_results cannot be empty")
 
         #Define TP, FP, TN, FN
         TP = 0
@@ -273,15 +431,25 @@ class BayesClassifier:
             elif result[1] == "negative" and result[2] == "negative":
                 TN += 1
 
+        # Calculate total for accuracy
+        total = TP + TN + FP + FN
+        if total == 0:
+            raise ValueError("No valid classification results to analyze")
 
-        #calculate metrics
-        accuracy = (TP + TN) / (TP + TN + FP + FN)
-        pos_precision = TP / (TP + FP)
-        pos_recall = TP / (TP + FN)
-        pos_f1 = 2 * pos_precision * pos_recall / (pos_precision + pos_recall)
-        neg_precision = TN / (TN + FN)
-        neg_recall = TN / (TN + FP)
-        neg_f1 = 2 * neg_precision * neg_recall / (neg_precision + neg_recall)
+        #calculate metrics with division by zero protection
+        accuracy = (TP + TN) / total
+        
+        # Positive metrics with division by zero handling
+        pos_precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
+        pos_recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+        pos_f1 = (2 * pos_precision * pos_recall / (pos_precision + pos_recall) 
+                  if (pos_precision + pos_recall) > 0 else 0.0)
+        
+        # Negative metrics with division by zero handling
+        neg_precision = TN / (TN + FN) if (TN + FN) > 0 else 0.0
+        neg_recall = TN / (TN + FP) if (TN + FP) > 0 else 0.0
+        neg_f1 = (2 * neg_precision * neg_recall / (neg_precision + neg_recall)
+                  if (neg_precision + neg_recall) > 0 else 0.0)
 
         return (accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1)
     def calculate_averages(self, k_sets_of_metrics: List[Tuple]) -> List[float]:
@@ -297,7 +465,21 @@ class BayesClassifier:
 
         Returns:
             Produces and returns a list of 7 items, the average value for each metric across the k runs.
+            
+        Raises:
+            ValueError: If k_sets_of_metrics is None, empty, or tuples have inconsistent sizes
         """
+        # Validate input
+        if k_sets_of_metrics is None:
+            raise ValueError("k_sets_of_metrics cannot be None")
+        if not k_sets_of_metrics:
+            raise ValueError("k_sets_of_metrics cannot be empty")
+        
+        # Validate all tuples have 7 elements
+        for i, metrics_tuple in enumerate(k_sets_of_metrics):
+            if len(metrics_tuple) != 7:
+                raise ValueError(f"Tuple at index {i} has {len(metrics_tuple)} elements, expected 7")
+        
         #tuple lookst like (accuracy, pos_precision, pos_recall, pos_f1, neg_precision, neg_recall, neg_f1)
         num_tuples = len(k_sets_of_metrics)
         accuracy = 0
@@ -334,30 +516,67 @@ class BayesClassifier:
         classifier with the other 9 sets).  More details can be found in the assignment pdf.
 
         Returns: None
+        
+        Raises:
+            ValueError: If split fails or produces no valid sets
         """
-        self.split() #split the data (file names) into self.k sets, stored self.sets
-        k_metrics = []
-        for i in range(self.k): #execute k-fold cross validation
-            td = self.sets[0:i] + self.sets[i+1:] #grab everything other than set i
-            training_data = []
-            for lst in td:
-                training_data += lst
-            self.train(training_data) #training on all sets other than set i
+        try:
+            self.split() #split the data (file names) into self.k sets, stored self.sets
+            
+            # Validate split succeeded
+            if not self.sets:
+                raise ValueError("split() failed to create any sets")
+            if len(self.sets) != self.k:
+                raise ValueError(f"split() created {len(self.sets)} sets, expected {self.k}")
+            
+            k_metrics = []
+            failed_folds = []
+            
+            for i in range(self.k): #execute k-fold cross validation
+                try:
+                    if logging_level >= 1:
+                        print(f"\nProcessing fold {i+1}/{self.k}")
+                    
+                    td = self.sets[0:i] + self.sets[i+1:] #grab everything other than set i
+                    training_data = []
+                    for lst in td:
+                        training_data += lst
+                    self.train(training_data) #training on all sets other than set i
 
-            testing_data = self.sets[i] #testing data is set i
-            classification_results = self.classify_all(testing_data)
-            metrics = self.analyze_results(classification_results)
-            k_metrics.append(metrics)
-        summary_results = self.calculate_averages(k_metrics)
+                    testing_data = self.sets[i] #testing data is set i
+                    classification_results = self.classify_all(testing_data)
+                    metrics = self.analyze_results(classification_results)
+                    k_metrics.append(metrics)
+                except Exception as e:
+                    # Handle errors in individual fold processing gracefully
+                    failed_folds.append((i, str(e)))
+                    if logging_level >= 1:
+                        print(f"Error processing fold {i+1}: {e}")
+            
+            # Check if we have any successful folds
+            if not k_metrics:
+                raise ValueError(f"All {self.k} folds failed to process. Check errors above.")
+            
+            # Report failed folds
+            if failed_folds and logging_level >= 1:
+                print(f"\nWarning: {len(failed_folds)} out of {self.k} folds failed")
+            
+            summary_results = self.calculate_averages(k_metrics)
 
-        print(f"summary of results")
-        print(f"average {summary_results[0]}")
-        print(f"positive precision {summary_results[1]}")
-        print(f"positive recall {summary_results[2]}")
-        print(f"positive f-measure {summary_results[3]}")
-        print(f"negative precision {summary_results[4]}")
-        print(f"negative recall {summary_results[5]}")
-        print(f"negative f-measure {summary_results[6]}")
+            print(f"\n{'='*60}")
+            print(f"K-Fold Cross-Validation Results ({len(k_metrics)}/{self.k} successful folds)")
+            print(f"{'='*60}")
+            print(f"average accuracy:      {summary_results[0]:.4f}")
+            print(f"positive precision:    {summary_results[1]:.4f}")
+            print(f"positive recall:       {summary_results[2]:.4f}")
+            print(f"positive f-measure:    {summary_results[3]:.4f}")
+            print(f"negative precision:    {summary_results[4]:.4f}")
+            print(f"negative recall:       {summary_results[5]:.4f}")
+            print(f"negative f-measure:    {summary_results[6]:.4f}")
+            print(f"{'='*60}")
+        except Exception as e:
+            print(f"\nEvaluation failed: {e}")
+            raise
 
 if __name__ == "__main__":
     b = BayesClassifier()
@@ -470,7 +689,7 @@ if __name__ == "__main__":
         print(list(map(lambda x: x[0] == x[1], zip(results, summary_results))))
     if logging_level >= 1:
         print(results)
-        
+
     assert len(b.calculate_averages(k_results)) == 7, "calculate averages test 1"
     assert b.calculate_averages(k_results) == summary_results, "calculate averages test 2"
 
